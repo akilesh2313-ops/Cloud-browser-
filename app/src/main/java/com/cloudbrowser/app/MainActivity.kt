@@ -201,6 +201,10 @@ class MainActivity : Activity() {
 
             CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
             webChromeClient = object : WebChromeClient() {
+                override fun onReceivedTitle(view: WebView?, title: String?) {
+                    if (view != null && !title.isNullOrBlank()) tabTitles[view] = title.take(60)
+                    updateTabsButton()
+                }
                 override fun onPermissionRequest(request: PermissionRequest) {
                     request.deny()
                 }
@@ -231,10 +235,6 @@ class MainActivity : Activity() {
                 }
                 override fun onPageFinished(view: WebView, url: String) {
                     if (view === browser) address.setText(url)
-                }
-                override fun onReceivedTitle(view: WebView, title: String?) {
-                    if (!title.isNullOrBlank()) tabTitles[view] = title.take(60)
-                    updateTabsButton()
                 }
                 override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
                     handler.cancel()
