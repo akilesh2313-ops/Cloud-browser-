@@ -4,6 +4,8 @@
     <application
         android:hardwareAccelerated="true"
         android:allowBackup="false"
+        android:icon="@drawable/ic_vabro"
+        android:roundIcon="@drawable/ic_vabro"
         android:label="VAbro"
         android:theme="@android:style/Theme.Material.NoActionBar"
         android:usesCleartextTraffic="false">
