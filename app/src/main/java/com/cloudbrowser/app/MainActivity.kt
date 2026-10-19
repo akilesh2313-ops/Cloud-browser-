@@ -10,6 +10,10 @@ import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.content.Context
+import android.app.DownloadManager
+import android.os.Environment
+import android.webkit.DownloadListener
+import android.webkit.URLUtil
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -200,6 +204,9 @@ class MainActivity : Activity() {
             }
 
             CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+            setDownloadListener(DownloadListener { url, userAgent, contentDisposition, mimeType, contentLength ->
+                handleDownload(url, userAgent, contentDisposition, mimeType, contentLength)
+            })
             webChromeClient = object : WebChromeClient() {
                 override fun onReceivedTitle(view: WebView?, title: String?) {
                     if (view != null && !title.isNullOrBlank()) tabTitles[view] = title.take(60)
@@ -256,6 +263,50 @@ class MainActivity : Activity() {
                 }
             }
         }
+    }
+
+
+    private fun handleDownload(url: String, userAgent: String?, contentDisposition: String?, mimeType: String?, contentLength: Long) {
+        val uri = android.net.Uri.parse(url)
+        if (!url.startsWith("https://", ignoreCase = true) || uri.host.isNullOrBlank()) {
+            AlertDialog.Builder(this).setTitle("Download blocked")
+                .setMessage("VAbro only allows downloads from HTTPS links. This download was not started.")
+                .setPositiveButton("OK", null).show()
+            return
+        }
+        val guessedName = URLUtil.guessFileName(url, contentDisposition, mimeType)
+            .replace(Regex("[\\\\/:*?\"<>|]"), "_").take(120).ifBlank { "download" }
+        val name = guessedName.lowercase()
+        val isApp = name.endsWith(".apk") || name.endsWith(".apks") || name.endsWith(".xapk")
+        val risky = isApp || listOf(".exe", ".msi", ".bat", ".cmd", ".sh", ".jar", ".scr", ".zip", ".rar", ".7z").any { name.endsWith(it) }
+        val size = if (contentLength > 0) "Approximate size: %.1f MB.\n".format(contentLength / (1024.0 * 1024.0)) else ""
+        val warning = when {
+            isApp -> "\n\nWARNING: This is an Android app package. Installing it can put your device and data at risk. Only install apps from a source you trust. VAbro cannot verify that it is safe."
+            risky -> "\n\nCaution: This file type may contain programs or other files. Verify the source and scan it before opening."
+            else -> "\n\nOnly download files from websites you trust. VAbro cannot guarantee a file is safe."
+        }
+        AlertDialog.Builder(this)
+            .setTitle(if (isApp) "Android app download" else "Confirm download")
+            .setMessage("File: $guessedName\nType: ${mimeType ?: "Unknown"}\n$size$warning")
+            .setNegativeButton("Cancel", null)
+            .setPositiveButton("Download") { _, _ ->
+                try {
+                    val request = DownloadManager.Request(uri).apply {
+                        setTitle(guessedName)
+                        setDescription("Downloaded with VAbro. Check the file before opening.")
+                        setMimeType(mimeType ?: "application/octet-stream")
+                        setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+                        setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, guessedName)
+                        if (!userAgent.isNullOrBlank()) addRequestHeader("User-Agent", userAgent)
+                        setAllowedOverMetered(true)
+                        setAllowedOverRoaming(false)
+                    }
+                    (getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager).enqueue(request)
+                    Toast.makeText(this, "Download started. Check the file before opening it.", Toast.LENGTH_LONG).show()
+                } catch (_: Exception) {
+                    Toast.makeText(this, "Could not start this download.", Toast.LENGTH_LONG).show()
+                }
+            }.show()
     }
 
     private fun recoverBrowser(crashed: WebView) {
