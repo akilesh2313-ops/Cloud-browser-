@@ -33,6 +33,7 @@ class MainActivity : Activity() {
     private lateinit var address: EditText
     private lateinit var webContainer: LinearLayout
     private lateinit var tabsButton: Button
+    private lateinit var tabStrip: LinearLayout
     private val tabs = mutableListOf<WebView>()
     private val tabTitles = mutableMapOf<WebView, String>()
     private val bg = Color.rgb(16, 18, 27)
@@ -98,11 +99,24 @@ class MainActivity : Activity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(0, 0, 0, 8)
         }
-        tabsButton = button("Tabs (1)") { showTabsDialog() }
-        tabBar.addView(tabsButton, LinearLayout.LayoutParams(0, 42, 1f))
-        tabBar.addView(button("+ New tab") { newTab("https://www.google.com") },
-            LinearLayout.LayoutParams(112, 42))
+        tabsButton = button("All tabs") { showTabsDialog() }
+        tabBar.addView(tabsButton, LinearLayout.LayoutParams(88, 42))
+        tabBar.addView(button("+") { newTab("https://www.google.com") },
+            LinearLayout.LayoutParams(48, 42))
         root.addView(tabBar)
+
+        val stripScroll = android.widget.HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            clipToPadding = false
+            setPadding(0, 0, 0, 8)
+        }
+        tabStrip = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        stripScroll.addView(tabStrip)
+        root.addView(stripScroll, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, 46))
 
         webContainer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -122,7 +136,58 @@ class MainActivity : Activity() {
     }
 
     private fun updateTabsButton() {
-        if (::tabsButton.isInitialized) tabsButton.text = "Tabs (${tabs.size})"
+        if (::tabsButton.isInitialized) tabsButton.text = "All tabs (${tabs.size})"
+        if (::tabStrip.isInitialized) refreshTabStrip()
+    }
+
+    private fun refreshTabStrip() {
+        tabStrip.removeAllViews()
+        tabs.forEachIndexed { index, web ->
+            val title = (tabTitles[web] ?: web.url ?: "New tab")
+                .substringAfterLast("://").take(18)
+            val chip = Button(this).apply {
+                text = if (web === browser) "● ${index + 1}: $title" else "${index + 1}: $title"
+                isAllCaps = false
+                textSize = 12f
+                setTextColor(Color.WHITE)
+                setBackgroundColor(if (web === browser) accent else panel)
+                setPadding(10, 0, 10, 0)
+                minHeight = 38
+                setOnClickListener { switchTab(web) }
+                setOnLongClickListener {
+                    AlertDialog.Builder(this@MainActivity)
+                        .setTitle("Tab options")
+                        .setItems(arrayOf("Switch to tab", "Close tab")) { _, choice ->
+                            if (choice == 0) switchTab(web)
+                            else closeTab(web)
+                        }.show()
+                    true
+                }
+            }
+            tabStrip.addView(chip, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, 40).apply {
+                marginEnd = 6
+            })
+        }
+    }
+
+    private fun closeTab(target: WebView) {
+        if (tabs.size <= 1) {
+            switchTab(target)
+            target.loadUrl("https://www.google.com")
+            tabTitles[target] = "New tab"
+            updateTabsButton()
+            return
+        }
+        val index = tabs.indexOf(target)
+        val wasCurrent = target === browser
+        (target.parent as? android.view.ViewGroup)?.removeView(target)
+        tabs.remove(target)
+        tabTitles.remove(target)
+        target.stopLoading()
+        target.destroy()
+        if (wasCurrent) switchTab(tabs[(index - 1).coerceAtLeast(0)])
+        updateTabsButton()
     }
 
     private fun showTabsDialog() {
@@ -169,16 +234,7 @@ class MainActivity : Activity() {
             updateTabsButton()
             return
         }
-        val old = browser
-        val index = tabs.indexOf(old)
-        webContainer.removeView(old)
-        tabs.remove(old)
-        tabTitles.remove(old)
-        old.stopLoading()
-        old.destroy()
-        val next = tabs[(index - 1).coerceAtLeast(0)]
-        switchTab(next)
-        updateTabsButton()
+        closeTab(browser)
     }
 
     private fun createBrowser(): WebView {
