@@ -10,7 +10,6 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.content.Context
 import android.webkit.CookieManager
-import android.webkit.SafeBrowsingResponse
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -20,7 +19,6 @@ import android.net.http.SslError
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
-import android.widget.TextView
 import android.widget.Toast
 import android.webkit.PermissionRequest
 import android.webkit.GeolocationPermissions
@@ -86,15 +84,26 @@ class MainActivity : Activity() {
         bar.addView(button("Go") { navigate() }, LinearLayout.LayoutParams(64, 48))
         root.addView(bar)
 
-        browser = WebView(this).apply {
+        browser = createBrowser()
+        root.addView(browser, LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
+        setContentView(root)
+        browser.loadUrl("https://www.google.com")
+    }
+
+
+    private fun createBrowser(): WebView {
+        return WebView(this).apply {
             setBackgroundColor(Color.WHITE)
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.loadsImagesAutomatically = true
             settings.useWideViewPort = true
             settings.loadWithOverviewMode = true
+            // Improve compatibility with HTML5 video players.
+            settings.mediaPlaybackRequiresUserGesture = false
 
-            // Harden WebView against local-file access and insecure mixed content.
+            // Keep local files inaccessible and block insecure mixed content.
             settings.allowFileAccess = false
             settings.allowContentAccess = false
             settings.allowFileAccessFromFileURLs = false
@@ -104,7 +113,8 @@ class MainActivity : Activity() {
             settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
             settings.safeBrowsingEnabled = true
 
-            CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
+            // Some media providers require third-party cookies; device permissions remain denied.
+            CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
             webChromeClient = object : WebChromeClient() {
                 override fun onPermissionRequest(request: PermissionRequest) {
                     request.deny()
@@ -125,9 +135,8 @@ class MainActivity : Activity() {
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     val uri = request.url
-                    val scheme = uri.scheme?.lowercase()
-                    if (scheme != "https") {
-                        Toast.makeText(this@MainActivity, "VAbro blocks non-HTTPS links for safety.", Toast.LENGTH_LONG).show()
+                    if (request.isForMainFrame && uri.scheme?.lowercase() != "https") {
+                        Toast.makeText(this@MainActivity, "VAbro blocks non-HTTPS pages for safety.", Toast.LENGTH_LONG).show()
                         return true
                     }
                     return false
@@ -136,16 +145,31 @@ class MainActivity : Activity() {
                     address.setText(url)
                 }
                 override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
-                    // Never allow users to bypass certificate errors.
                     handler.cancel()
                     Toast.makeText(this@MainActivity, "Secure connection failed. Page blocked.", Toast.LENGTH_LONG).show()
                 }
+                override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean {
+                    if (view === browser) recoverBrowser(view)
+                    return true
+                }
             }
         }
-        root.addView(browser, LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
-        setContentView(root)
-        browser.loadUrl("https://www.google.com")
+    }
+
+    private fun recoverBrowser(crashed: WebView) {
+        val parent = crashed.parent as? LinearLayout
+        val index = parent?.indexOfChild(crashed) ?: -1
+        val params = crashed.layoutParams
+        parent?.removeView(crashed)
+        crashed.destroy()
+        if (parent != null && index >= 0) {
+            browser = createBrowser()
+            parent.addView(browser, index, params)
+            val current = address.text.toString().trim()
+            val target = if (current.startsWith("https://", ignoreCase = true)) current else "https://www.google.com"
+            browser.loadUrl(target)
+            Toast.makeText(this, "The page stopped unexpectedly. VAbro restored it.", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun navigate() {
