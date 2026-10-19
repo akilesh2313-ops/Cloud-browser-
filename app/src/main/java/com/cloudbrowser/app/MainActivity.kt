@@ -143,28 +143,50 @@ class MainActivity : Activity() {
     private fun refreshTabStrip() {
         tabStrip.removeAllViews()
         tabs.forEachIndexed { index, web ->
+            val active = web === browser
+            val tabCard = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setBackgroundColor(if (active) accent else panel)
+                setPadding(4, 0, 4, 0)
+            }
             val title = (tabTitles[web] ?: web.url ?: "New tab")
-                .substringAfterLast("://").take(18)
-            val chip = Button(this).apply {
-                text = if (web === browser) "● ${index + 1}: $title" else "${index + 1}: $title"
+                .substringAfterLast("://").take(15).ifBlank { "New tab" }
+            val tabTitle = Button(this).apply {
+                text = title
                 isAllCaps = false
                 textSize = 12f
                 setTextColor(Color.WHITE)
-                setBackgroundColor(if (web === browser) accent else panel)
-                setPadding(10, 0, 10, 0)
+                setBackgroundColor(Color.TRANSPARENT)
+                setPadding(8, 0, 4, 0)
                 minHeight = 38
+                minWidth = 0
                 setOnClickListener { switchTab(web) }
-                setOnLongClickListener {
-                    AlertDialog.Builder(this@MainActivity)
-                        .setTitle("Tab options")
-                        .setItems(arrayOf("Switch to tab", "Close tab")) { _, choice ->
-                            if (choice == 0) switchTab(web)
-                            else closeTab(web)
-                        }.show()
-                    true
-                }
             }
-            tabStrip.addView(chip, LinearLayout.LayoutParams(
+            tabCard.addView(tabTitle, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, 40))
+            val close = Button(this).apply {
+                text = "×"
+                isAllCaps = false
+                textSize = 18f
+                setTextColor(Color.WHITE)
+                setBackgroundColor(Color.TRANSPARENT)
+                minWidth = 36
+                minHeight = 38
+                setPadding(0, 0, 0, 0)
+                contentDescription = "Close tab ${index + 1}"
+                setOnClickListener { closeTab(web) }
+            }
+            tabCard.addView(close, LinearLayout.LayoutParams(36, 40))
+            tabCard.setOnLongClickListener {
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle(title)
+                    .setItems(arrayOf("Switch to tab", "Close tab")) { _, choice ->
+                        if (choice == 0) switchTab(web) else closeTab(web)
+                    }.show()
+                true
+            }
+            tabStrip.addView(tabCard, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, 40).apply {
                 marginEnd = 6
             })
