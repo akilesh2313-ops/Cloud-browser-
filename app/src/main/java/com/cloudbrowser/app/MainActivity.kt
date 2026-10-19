@@ -9,14 +9,21 @@ import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.content.Context
+import android.webkit.CookieManager
+import android.webkit.SafeBrowsingResponse
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.webkit.SslErrorHandler
+import android.net.http.SslError
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
+import android.webkit.PermissionRequest
+import android.webkit.GeolocationPermissions
 
 class MainActivity : Activity() {
     private lateinit var browser: WebView
@@ -58,7 +65,7 @@ class MainActivity : Activity() {
             LinearLayout.LayoutParams(48, 48))
 
         address = EditText(this).apply {
-            hint = "Search or enter website"
+            hint = "Search or enter HTTPS website"
             isSingleLine = true
             textSize = 15f
             setTextColor(Color.WHITE)
@@ -86,14 +93,52 @@ class MainActivity : Activity() {
             settings.loadsImagesAutomatically = true
             settings.useWideViewPort = true
             settings.loadWithOverviewMode = true
+
+            // Harden WebView against local-file access and insecure mixed content.
+            settings.allowFileAccess = false
+            settings.allowContentAccess = false
+            settings.allowFileAccessFromFileURLs = false
+            settings.allowUniversalAccessFromFileURLs = false
             settings.javaScriptCanOpenWindowsAutomatically = false
-            webChromeClient = WebChromeClient()
+            settings.setSupportMultipleWindows(false)
+            settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
+            settings.safeBrowsingEnabled = true
+
+            CookieManager.getInstance().setAcceptThirdPartyCookies(this, false)
+            webChromeClient = object : WebChromeClient() {
+                override fun onPermissionRequest(request: PermissionRequest) {
+                    request.deny()
+                }
+                override fun onGeolocationPermissionsShowPrompt(
+                    origin: String,
+                    callback: GeolocationPermissions.Callback
+                ) {
+                    callback.invoke(origin, false, false)
+                }
+                override fun onCreateWindow(
+                    view: WebView?,
+                    isDialog: Boolean,
+                    isUserGesture: Boolean,
+                    resultMsg: android.os.Message?
+                ): Boolean = false
+            }
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                    val uri = request.url
+                    val scheme = uri.scheme?.lowercase()
+                    if (scheme != "https") {
+                        Toast.makeText(this@MainActivity, "VAbro blocks non-HTTPS links for safety.", Toast.LENGTH_LONG).show()
+                        return true
+                    }
                     return false
                 }
                 override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
                     address.setText(url)
+                }
+                override fun onReceivedSslError(view: WebView, handler: SslErrorHandler, error: SslError) {
+                    // Never allow users to bypass certificate errors.
+                    handler.cancel()
+                    Toast.makeText(this@MainActivity, "Secure connection failed. Page blocked.", Toast.LENGTH_LONG).show()
                 }
             }
         }
@@ -104,13 +149,24 @@ class MainActivity : Activity() {
     }
 
     private fun navigate() {
-        var text = address.text.toString().trim()
+        val text = address.text.toString().trim()
         if (text.isEmpty()) return
         val url = if (text.contains(" ") || (!text.contains(".") && !text.startsWith("http"))) {
             "https://www.google.com/search?q=" + android.net.Uri.encode(text)
-        } else if (!text.startsWith("http://") && !text.startsWith("https://")) {
-            "https://$text"
-        } else text
+        } else {
+            val normalized = if (text.startsWith("http://", ignoreCase = true)) {
+                Toast.makeText(this, "HTTP is blocked. Trying HTTPS instead.", Toast.LENGTH_LONG).show()
+                text.replaceFirst(Regex("^http://", RegexOption.IGNORE_CASE), "https://")
+            } else if (!text.startsWith("https://", ignoreCase = true)) {
+                "https://$text"
+            } else text
+            normalized
+        }
+        val parsed = android.net.Uri.parse(url)
+        if (parsed.scheme != "https") {
+            Toast.makeText(this, "Only HTTPS websites are allowed.", Toast.LENGTH_LONG).show()
+            return
+        }
         val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
         imm.hideSoftInputFromWindow(address.windowToken, 0)
         browser.loadUrl(url)
